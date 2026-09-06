@@ -369,19 +369,34 @@ Not persisted directly. Assembled at evaluation time by collecting all eligible 
 | `assessmentResultId` | `UUID` | Parent result |
 | `parameterDefinitionId` | `UUID` | Which parameter |
 | `scoringStrategyType` | `ScoringStrategyType` | Strategy used |
-| `rawValue` | `BigDecimal` | Raw metric/value (for objective parameters) |
-| `normalizedScore` | `BigDecimal` | Canonical 0–100 score |
-| `aiSuggestedScore` | `BigDecimal` | AI's suggestion (canonical) |
-| `humanApprovedScore` | `BigDecimal` | Reviewer's approved score (canonical) |
-| `finalScore` | `BigDecimal` | Deterministic final (= humanApproved if set, else aiSuggested) |
-| `weight` | `BigDecimal` | Parameter weight at time of calculation |
-| `weightedScore` | `BigDecimal` | finalScore × weight |
+| `rawValue` | `BigDecimal` | Raw metric/value (for objective parameters; null for qualitative) |
+| `normalizedScore` | `BigDecimal` | Canonical 0–100 score (output of strategy execution) |
+| `aiSuggestedScore` | `BigDecimal` | AI's suggestion (canonical; null for OBJECTIVE) |
+| `preReviewScore` | `BigDecimal` | Score at the time review begins (= `normalizedScore`). Strategy-neutral. |
+| `humanApprovedScore` | `BigDecimal` | Reviewer's approved score (null if not yet reviewed) |
+| `finalScore` | `BigDecimal` | Effective score: `humanApprovedScore` if present, else `normalizedScore` |
+| `configuredWeight` | `BigDecimal` | Framework-defined parameter weight |
+| `effectiveWeight` | `BigDecimal` | Actual weight after N/A redistribution (recorded for audit) |
+| `weightedScore` | `BigDecimal` | `finalScore` × `effectiveWeight` |
+| `status` | `ParameterResultStatus` | See enum below |
 | `evidenceSufficiency` | `EvidenceSufficiency` | Evidence state |
 | `evidenceStrength` | `EvidenceStrengthLevel` | `HIGH`, `MEDIUM`, `LOW`, `INSUFFICIENT` |
-| `evaluationConfidence` | `BigDecimal` | 0.0–1.0, how well-supported |
-| `rubricLevel` | `Integer` | Mapped rubric level |
-| `displayRating` | `String` | Mapped display rating |
+| `evaluationConfidence` | `BigDecimal` | Platform-computed confidence (0.0–1.0). Formula is POLICY-GATED. |
+| `rubricLevel` | `Integer` | Platform-resolved rubric level (from normalizedScore) |
+| `displayRating` | `String` | Mapped display rating label |
 | `calculatedAt` | `Instant` | Calculation timestamp |
+
+> **Invariant:** `finalScore` is ALWAYS deterministic: `humanApprovedScore` if non-null, else `normalizedScore`. It is never `aiSuggestedScore` directly — AI suggestions enter scoring as input to the strategy, which produces `normalizedScore`.
+
+#### ParameterResultStatus (Enum)
+
+| Value | Meaning |
+|-------|-------|
+| `SCORED` | Score calculated successfully |
+| `INSUFFICIENT_EVIDENCE` | Evidence below minimum requirements; scored with missing-data policy |
+| `NOT_APPLICABLE` | Parameter not applicable to this subject/assessment |
+| `EVALUATION_FAILED` | AI evaluation failed for this parameter; may require manual review |
+| `EXCLUDED` | Excluded from overall calculation (weight redistributed) |
 
 #### AssessmentResult (Aggregate Root)
 
@@ -390,13 +405,38 @@ Not persisted directly. Assembled at evaluation time by collecting all eligible 
 | `id` | `UUID` | Unique identifier |
 | `assessmentId` | `UUID` | Owning assessment |
 | `frameworkVersionId` | `UUID` | Framework version used |
-| `evaluationRunId` | `UUID` | Source evaluation |
+| `evaluationRunId` | `UUID` | Source evaluation (null for pure-objective recalculations) |
 | `parameterResults` | `List<ParameterResult>` | Per-parameter results |
-| `overallScore` | `BigDecimal` | Weighted sum of final parameter scores |
-| `overallRating` | `String` | Mapped display rating |
-| `resultStatus` | `ResultStatus` | `PRELIMINARY`, `REVIEWED`, `APPROVED`, `OVERRIDDEN` |
+| `overallScore` | `BigDecimal` | Weighted sum of `finalScore` × `effectiveWeight` across active parameters |
+| `overallRatingValue` | `String` | Mapped rating code from RatingScale |
+| `overallRatingLabel` | `String` | Human-readable rating label |
+| `completeness` | `AssessmentResultCompleteness` | `COMPLETE`, `PARTIAL`, `BLOCKED` |
 | `calculatedAt` | `Instant` | Calculation timestamp |
-| `version` | `Integer` | Result version (incremented on recalculation) |
+| `version` | `Integer` | Immutable result version (new version on recalculation) |
+
+> **Immutability Invariant:** Once persisted, an `AssessmentResult` is never modified. Recalculation produces a NEW `AssessmentResult` with an incremented `version`. All versions are retained for audit.
+
+#### AssessmentResultCompleteness (Enum)
+
+| Value | Meaning |
+|-------|---------|
+| `COMPLETE` | All active parameters scored successfully |
+| `PARTIAL` | Some parameters scored, others failed or excluded |
+| `BLOCKED` | Insufficient parameters scored to produce a meaningful overall result |
+
+#### QualitativeEvaluationInput (Value Object — Scoring Module Owned)
+
+The scoring module's input contract for AI evaluation results. Defined in the scoring module, NOT in evaluation or AI modules. The evaluation module maps `AiParameterEvaluation` → `QualitativeEvaluationInput` before invoking scoring.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `suggestedScore` | `BigDecimal` | AI-suggested canonical score (0–100) |
+| `suggestedRubricLevel` | `Integer` | AI-suggested rubric level |
+| `aiReportedConfidence` | `BigDecimal` | AI's self-reported confidence (0.0–1.0) |
+| `aiReportedEvidenceStrength` | `EvidenceStrengthLevel` | AI's assessment of evidence quality |
+| `dimensionScores` | `Map<String, BigDecimal>` | Per-dimension scores (if applicable) |
+
+> **Design Note:** This VO decouples scoring from AI implementation. Scoring strategies consume `QualitativeEvaluationInput` and produce `normalizedScore`. The VO contains no justification text, no evidence references, no raw AI response — only the mathematical inputs needed for scoring.
 
 #### ScoringStrategy (Interface)
 
@@ -409,13 +449,14 @@ public interface ScoringStrategy {
 
 Where `ScoringContext` contains:
 - `ParameterDefinition` (with rubric, strategy config)
-- `EvidenceSet` (assembled evidence)
-- `AiParameterEvaluation` (AI suggestion, if available)
-- `ObjectiveFacts` (pre-calculated metrics, if any)
+- `EvidenceSet` (assembled evidence for sufficiency/strength)
+- `QualitativeEvaluationInput` (scoring-owned VO; null for pure OBJECTIVE)
+- `ObjectiveFacts` (pre-calculated deterministic metrics, if any)
 
 And `ParameterScoreResult` contains:
 - `normalizedScore` (BigDecimal 0–100)
-- `rubricLevel` (Integer)
+- `rubricLevel` (Integer — platform-resolved from normalizedScore)
+- `status` (`ParameterResultStatus`)
 - `evidenceSufficiency`
 - `calculationMetadata` (for audit)
 
@@ -430,30 +471,78 @@ And `ParameterScoreResult` contains:
 | `id` | `UUID` | Unique identifier |
 | `assessmentId` | `UUID` | Assessment being evaluated |
 | `frameworkVersionId` | `UUID` | Framework version |
-| `status` | `EvaluationStatus` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `PARTIALLY_COMPLETED` |
-| `aiModelMetadata` | `AiModelMetadata` (VO) | Model used |
+| `status` | `EvaluationStatus` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `PARTIALLY_COMPLETED`, `STALE` |
+| `aiModelMetadata` | `AiModelMetadata` (VO) | Model config used |
 | `promptVersionRef` | `PromptVersionRef` (VO) | Prompt version |
 | `parameterEvaluations` | `List<AiParameterEvaluation>` | Per-parameter AI results |
+| `aiInteractions` | `List<AiInteraction>` | Per-call audit records |
+| `evaluationInputSnapshot` | `EvaluationInputSnapshot` (VO) | Immutable record of input context |
 | `startedAt` | `Instant` | Start time |
 | `completedAt` | `Instant` | Completion time |
 | `requestedBy` | `UUID` | Requesting user |
+| `requestedLocale` | `String` | Locale for AI qualitative interpretation (e.g., `en`, `bn`) |
 
-#### AiParameterEvaluation (Entity)
+> **Crash Recovery:** On application startup, all `EvaluationRun` records with status `IN_PROGRESS` and `startedAt` older than a configurable threshold are transitioned to `STALE`. A `STALE` run can be retried (creates a new `EvaluationRun`) or abandoned. This prevents orphaned evaluations from blocking assessments.
+
+#### AiParameterEvaluation (Entity, Immutable)
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `UUID` | Unique identifier |
 | `parameterDefinitionId` | `UUID` | Parameter evaluated |
-| `suggestedScore` | `BigDecimal` | AI-suggested canonical score |
-| `suggestedRubricLevel` | `Integer` | AI-suggested rubric level |
-| `confidence` | `BigDecimal` | AI-reported confidence (0.0–1.0) |
-| `evidenceStrength` | `EvidenceStrengthLevel` | AI assessment of evidence strength |
-| `justification` | `String` | AI explanation |
-| `strengths` | `List<String>` | Identified strengths |
-| `improvementAreas` | `List<String>` | Development areas |
+| `suggestedScore` | `BigDecimal` | AI-suggested canonical score (0–100) |
+| `suggestedRubricLevel` | `Integer` | AI-suggested rubric level (diagnostic) |
+| `confidence` | `BigDecimal` | AI-reported confidence (0.0–1.0; diagnostic, not calibrated) |
+| `evidenceStrength` | `EvidenceStrengthLevel` | AI assessment of evidence strength (diagnostic) |
+| `justification` | `String` | AI explanation (may be null if AI declined) |
+| `strengths` | `List<String>` | Identified strengths (may be empty — not forced) |
+| `improvementAreas` | `List<String>` | Development areas (may be empty — not forced) |
 | `dimensionScores` | `Map<String, BigDecimal>` | Per-dimension scores if applicable |
-| `evidenceReferences` | `List<UUID>` | Evidence items referenced |
-| `rawAiResponse` | `String` | Raw AI response (for debugging) |
+| `evidenceReferences` | `List<UUID>` | Evidence items referenced by AI |
+| `status` | `ParameterEvaluationStatus` | `COMPLETED`, `FAILED`, `SKIPPED` |
+
+> **Invariant:** Once persisted, an `AiParameterEvaluation` is never modified. It is an immutable historical record.
+
+#### AiInteraction (Entity, Immutable)
+
+Per-AI-call audit record. One EvaluationRun may produce multiple AiInteraction records (one per parameter, or one per batch, plus retries).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `UUID` | Unique identifier |
+| `evaluationRunId` | `UUID` | Parent evaluation run |
+| `parameterDefinitionId` | `UUID` | Target parameter (null for batch calls) |
+| `requestTimestamp` | `Instant` | When the AI call was made |
+| `responseTimestamp` | `Instant` | When the AI response was received |
+| `durationMs` | `Long` | Call duration in milliseconds |
+| `providerType` | `String` | AI provider type |
+| `modelName` | `String` | Model used |
+| `promptVersionRef` | `String` | Prompt template version |
+| `inputTokenCount` | `Integer` | Approximate input tokens |
+| `outputTokenCount` | `Integer` | Approximate output tokens |
+| `httpStatus` | `Integer` | HTTP status code (or equivalent) |
+| `success` | `Boolean` | Whether the call produced valid output |
+| `failureReason` | `String` | Error description if failed |
+| `attemptNumber` | `Integer` | Retry attempt number (1 = first try) |
+
+> **Design Note:** `AiInteraction` does NOT store raw prompt/response content at the domain level. Raw AI content is stored in `rawAiResponse` on successful `AiParameterEvaluation` records. This keeps `AiInteraction` focused on operational audit (latency, cost, reliability) while `AiParameterEvaluation` holds evaluation-quality audit.
+
+#### EvaluationInputSnapshot (Value Object, Immutable)
+
+Captures the complete input context used for an evaluation, enabling historical reproducibility. Stored as structured JSON on `EvaluationRun`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `frameworkVersionId` | `UUID` | Framework version used |
+| `parameterDefinitionIds` | `List<UUID>` | Parameters evaluated |
+| `evidenceItemIds` | `List<UUID>` | Evidence items available at evaluation time |
+| `evidenceVerificationStates` | `Map<UUID, String>` | Verification status of each evidence item at snapshot time |
+| `objectiveFacts` | `Map<String, BigDecimal>` | Pre-calculated deterministic facts (attendance %, etc.) |
+| `academicFacts` | `Map<String, Object>` | Academic calculation results (student domain) |
+| `locale` | `String` | Requested locale |
+| `snapshotTimestamp` | `Instant` | When the snapshot was captured |
+
+> **Reproducibility Invariant:** Given the same `EvaluationInputSnapshot` content and the same AI model/prompt, a re-evaluation SHOULD produce comparable results. Deterministic scoring replay using stored `AiParameterEvaluation` output MUST produce identical results.
 
 #### AiModelMetadata (Value Object)
 
@@ -491,9 +580,10 @@ And `ParameterScoreResult` contains:
 | `id` | `UUID` | Unique identifier |
 | `parameterDefinitionId` | `UUID` | Parameter |
 | `action` | `ReviewAction` | `APPROVED`, `MODIFIED`, `RETURNED` |
-| `originalAiScore` | `BigDecimal` | AI suggestion at review time |
-| `approvedScore` | `BigDecimal` | Final approved score |
-| `overrideReason` | `String` | Mandatory if `MODIFIED` |
+| `preReviewScore` | `BigDecimal` | Score before review (= `ParameterResult.normalizedScore`). Strategy-neutral. |
+| `approvedScore` | `BigDecimal` | Reviewer-approved score (= `preReviewScore` if APPROVED; different if MODIFIED) |
+| `overrideReason` | `String` | Mandatory if `MODIFIED`; describes why score was changed |
+| `scoringStrategyType` | `ScoringStrategyType` | Strategy of the parameter (for strategy-aware override validation) |
 | `reviewedAt` | `Instant` | Timestamp |
 
 #### OverallOverride (Entity)
@@ -630,7 +720,8 @@ Deterministically calculated by the academic module:
 ┌──────────────────┐
 │EVIDENCE_COLLECTION│◄──────────────┐
 └────────┬─────────┘               │
-         │  (all evidence submitted) │  (RETURNED from review)
+         │  (sufficiency satisfied    │  (RETURNED from review)
+         │   or manually marked)     │
          ▼                          │
 ┌──────────────────┐               │
 │EVALUATION_READY  │               │
@@ -650,12 +741,12 @@ Deterministically calculated by the academic module:
 ┌──────────────────┐               │
 │  UNDER_REVIEW    │───────────────┘
 └────────┬─────────┘
-         │  (approved)
+         │  (all parameters reviewed)
          ▼
 ┌──────────────────┐
 │    APPROVED      │
 └────────┬─────────┘
-         │  (pen picture generated, locked)
+         │  (pen picture generated, assessment locked)
          ▼
 ┌──────────────────┐
 │   FINALIZED      │
@@ -663,6 +754,21 @@ Deterministically calculated by the academic module:
 
 Any non-final state → CANCELLED
 ```
+
+### State Transition Rules
+
+| Transition | Trigger | Guard Condition |
+|-----------|---------|----------------|
+| `CREATED` → `EVIDENCE_COLLECTION` | First evidence submitted | None |
+| `EVIDENCE_COLLECTION` → `EVALUATION_READY` | Evidence sufficiency check or manual mark | Evidence sufficiency satisfied for evaluable parameters, OR assessor explicitly marks ready |
+| `EVALUATION_READY` → `EVALUATING` | Evaluation triggered | No `IN_PROGRESS` evaluation exists for this assessment |
+| `EVALUATING` → `EVALUATED` | Evaluation + scoring complete | `EvaluationRun` status = `COMPLETED` or `PARTIALLY_COMPLETED`, `AssessmentResult` persisted |
+| `EVALUATED` → `UNDER_REVIEW` | Sent for review | At least one parameter result exists |
+| `UNDER_REVIEW` → `RETURNED` | Reviewer returns | Any `ParameterReview.action` = `RETURNED` |
+| `RETURNED` → `EVIDENCE_COLLECTION` | Evidence correction begins | Assessment status reset; evidence may be added/corrected |
+| `UNDER_REVIEW` → `APPROVED` | Review completed | All parameters reviewed; no `RETURNED` actions; `ReviewSession.status` = `COMPLETED` |
+| `APPROVED` → `FINALIZED` | Finalization triggered | Pen picture generated (or explicitly waived); authorized user confirms |
+| Any non-final → `CANCELLED` | Cancellation | Authorized user; assessment not `FINALIZED` |
 
 ---
 

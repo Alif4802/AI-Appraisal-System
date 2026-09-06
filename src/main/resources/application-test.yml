@@ -1,0 +1,12 @@
+# Test profile configuration
+# In Phase 0, database auto-configuration is not required for unit/smoke tests.
+# Real database integration tests use Testcontainers with dynamic properties.
+spring:
+  flyway:
+    enabled: false
+  jpa:
+    open-in-view: false
+
+logging:
+  level:
+    com.aias: DEBUG

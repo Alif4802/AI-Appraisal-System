@@ -68,11 +68,11 @@ src/test/java/com/aias/
 - Flyway migration runs successfully
 
 ### Acceptance Criteria
-- [x] `mvn clean test` passes
-- [x] Application starts with Docker Compose PostgreSQL
-- [x] ArchUnit enforces module boundaries
-- [x] All module packages exist
-- [x] OpenAPI/Swagger UI accessible
+- [ ] `mvn clean test` passes
+- [ ] Application starts with Docker Compose PostgreSQL
+- [ ] ArchUnit enforces module boundaries
+- [ ] All module packages exist
+- [ ] OpenAPI/Swagger UI accessible
 
 ### Dependencies
 None
@@ -127,13 +127,13 @@ Flyway migrations for:
 - ArchUnit: Framework module boundaries
 
 ### Acceptance Criteria
-- [x] Can create a framework with parameters, rubrics, and weights via API
-- [x] Can activate a version (becomes immutable)
-- [x] Cannot modify an activated version
-- [x] Weights validated to sum to 1.0
-- [x] Rubric levels properly ordered with canonical score ranges
-- [x] Multiple framework versions can coexist
-- [x] Different domain types (EMPLOYEE, TEACHER, STUDENT) supported
+- [ ] Can create a framework with parameters, rubrics, and weights via API
+- [ ] Can activate a version (becomes immutable)
+- [ ] Cannot modify an activated version
+- [ ] Weights validated to sum to 1.0
+- [ ] Rubric levels properly ordered with canonical score ranges
+- [ ] Multiple framework versions can coexist
+- [ ] Different domain types (EMPLOYEE, TEACHER, STUDENT) supported
 
 ### Dependencies
 Phase 0
@@ -176,11 +176,11 @@ Implement the assessment lifecycle, subject management, and status transitions.
 - State machine: All valid transitions pass; invalid transitions throw exceptions
 
 ### Acceptance Criteria
-- [x] Can create assessment linked to active framework version
-- [x] Cannot create assessment with DRAFT or ARCHIVED framework
-- [x] Status transitions follow the defined state machine
-- [x] Invalid transitions rejected with clear errors
-- [x] Assessment period validation (start < end)
+- [ ] Can create assessment linked to active framework version
+- [ ] Cannot create assessment with DRAFT or ARCHIVED framework
+- [ ] Status transitions follow the defined state machine
+- [ ] Invalid transitions rejected with clear errors
+- [ ] Assessment period validation (start < end)
 
 ### Dependencies
 Phase 1
@@ -226,12 +226,12 @@ Implement evidence submission, provenance tracking, parameter mapping, and suffi
 - Integration: Repository, API, batch submission, sufficiency query
 
 ### Acceptance Criteria
-- [x] Can submit evidence with source type and provenance
-- [x] Can map evidence to parameters with relationship types (PRIMARY, SUPPORTING, etc.)
-- [x] Sufficiency evaluation respects framework evidence rules
-- [x] Batch submission works
-- [x] Verification status can be updated
-- [x] Evidence filtered by assessment and parameter
+- [ ] Can submit evidence with source type and provenance
+- [ ] Can map evidence to parameters with relationship types (PRIMARY, SUPPORTING, etc.)
+- [ ] Sufficiency evaluation respects framework evidence rules
+- [ ] Batch submission works
+- [ ] Verification status can be updated
+- [ ] Evidence filtered by assessment and parameter
 
 ### Dependencies
 Phase 2
@@ -265,7 +265,9 @@ Implement the scoring engine with all five strategy types, weighting, rating con
 - Flyway migrations for result tables
 
 ### Domain Concepts
-- `ScoringStrategy`, `ScoringContext`, `ParameterScoreResult`, `ParameterResult`, `AssessmentResult`, `CanonicalScore`, `WeightedScore`, `MissingDataPolicy`, `RatingConversion`, `ResultStatus`, `CalculationMetadata`
+- `ScoringStrategy`, `ScoringContext`, `ParameterScoreResult`, `ParameterResult`, `AssessmentResult`, `CanonicalScore`, `WeightedScore`, `MissingDataPolicy`, `RatingConversion`, `ParameterResultStatus`, `AssessmentResultCompleteness`, `QualitativeEvaluationInput`, `CalculationMetadata`
+
+> **Scoring↔Evaluation Boundary:** Scoring strategies receive `QualitativeEvaluationInput` (owned by scoring module), NOT `AiParameterEvaluation` (owned by evaluation module). See `01-architecture.md` §4.5 and `02-domain-model.md` §3.4.
 
 ### APIs
 - `GET /api/v1/assessments/{id}/results`
@@ -294,14 +296,14 @@ Implement the scoring engine with all five strategy types, weighting, rating con
 - Integration tests for result persistence
 
 ### Acceptance Criteria
-- [x] All five scoring strategies implemented and independently testable
-- [x] Scoring engine produces deterministic results
-- [x] Same inputs always produce same outputs (reproducibility test)
-- [x] Weighted aggregation correct with BigDecimal precision
-- [x] Missing-data policies work correctly (all 5 policies)
-- [x] Rating conversion works with configurable scales
-- [x] Result versioning works (recalculation creates new version)
-- [x] > 50 unit tests for scoring logic pass
+- [ ] All five scoring strategies implemented and independently testable
+- [ ] Scoring engine produces deterministic results
+- [ ] Same inputs always produce same outputs (reproducibility test)
+- [ ] Weighted aggregation correct with BigDecimal precision
+- [ ] Missing-data policies work correctly (all 5 policies)
+- [ ] Rating conversion works with configurable scales
+- [ ] Result versioning works (recalculation creates new version)
+- [ ] > 50 unit tests for scoring logic pass
 
 ### Dependencies
 Phase 3
@@ -344,13 +346,13 @@ Implement the AI gateway port, Spring AI adapter, prompt template management, an
 - Provider independence: Verify domain layer has zero Spring AI imports
 
 ### Acceptance Criteria
-- [x] AiGateway interface defined in domain; no Spring AI in domain
-- [x] SpringAiGatewayAdapter calls Spring AI ChatClient
-- [x] Structured output DTOs validated via Jakarta Validation
-- [x] Prompt templates stored and versioned in database
-- [x] Model metadata captured on every AI call
-- [x] Provider configurable via application.yml
-- [x] ArchUnit confirms scoring/domain doesn't import AI
+- [ ] AiGateway interface defined in domain; no Spring AI in domain
+- [ ] SpringAiGatewayAdapter calls Spring AI ChatClient
+- [ ] Structured output DTOs validated via Jakarta Validation
+- [ ] Prompt templates stored and versioned in database
+- [ ] Model metadata captured on every AI call
+- [ ] Provider configurable via application.yml
+- [ ] ArchUnit confirms scoring/domain doesn't import AI
 
 ### Dependencies
 Phase 4
@@ -396,15 +398,15 @@ Implement the complete evaluation pipeline: context assembly → AI call → val
 - Error handling: Retry on validation failure, fallback on provider error
 
 ### Acceptance Criteria
-- [x] Full pipeline: evidence → AI evaluation → scoring → result
-- [x] AI responses validated against schema and domain rules
-- [x] Evidence grounding checked (referenced evidence exists)
-- [x] OBJECTIVE parameters skip AI, scored directly
-- [x] QUALITATIVE parameters scored via AI
-- [x] HYBRID parameters combine objective + AI
-- [x] EvaluationRun records all metadata (model, prompt, timestamps)
-- [x] Retry on validation failure (up to configured max)
-- [x] Partial completion on per-parameter failures
+- [ ] Full pipeline: evidence → AI evaluation → scoring → result
+- [ ] AI responses validated against schema and domain rules
+- [ ] Evidence grounding checked (referenced evidence exists)
+- [ ] OBJECTIVE parameters skip AI, scored directly
+- [ ] QUALITATIVE parameters scored via AI
+- [ ] HYBRID parameters combine objective + AI
+- [ ] EvaluationRun records all metadata (model, prompt, timestamps)
+- [ ] Retry on validation failure (up to configured max)
+- [ ] Partial completion on per-parameter failures
 
 ### Dependencies
 Phase 5
@@ -451,13 +453,13 @@ Implement the human review workflow with parameter-level approve/modify/return a
 - Override: AI suggestion preserved, human score replaces, overall recalculated
 
 ### Acceptance Criteria
-- [x] Reviewer can approve each parameter's AI-suggested score
-- [x] Reviewer can modify a parameter score with mandatory reason
-- [x] Overall score recalculated deterministically after parameter overrides
-- [x] AI suggested score NEVER erased by human review
-- [x] Return sends assessment back to EVIDENCE_COLLECTION or EVALUATION_READY
-- [x] Overall override requires SENIOR_REVIEWER permission and mandatory justification
-- [x] Review session history preserved (append-only)
+- [ ] Reviewer can approve each parameter's AI-suggested score
+- [ ] Reviewer can modify a parameter score with mandatory reason
+- [ ] Overall score recalculated deterministically after parameter overrides
+- [ ] AI suggested score NEVER erased by human review
+- [ ] Return sends assessment back to EVIDENCE_COLLECTION or EVALUATION_READY
+- [ ] Overall override requires SENIOR_REVIEWER permission and mandatory justification
+- [ ] Review session history preserved (append-only)
 
 ### Dependencies
 Phase 6
@@ -498,12 +500,12 @@ Implement domain-specific pen picture generation using AI based on structured as
 - Integration: Generation with mocked AI, storage, versioning
 
 ### Acceptance Criteria
-- [x] Pen picture generated from structured assessment data (not independently)
-- [x] Domain-specific templates used (Employee vs. Teacher vs. Student)
-- [x] Generated text based on approved scores, strengths, development areas
-- [x] Model metadata captured
-- [x] Versioning: regeneration creates new version
-- [x] Assessment finalization after pen picture
+- [ ] Pen picture generated from structured assessment data (not independently)
+- [ ] Domain-specific templates used (Employee vs. Teacher vs. Student)
+- [ ] Generated text based on approved scores, strengths, development areas
+- [ ] Model metadata captured
+- [ ] Versioning: regeneration creates new version
+- [ ] Assessment finalization after pen picture
 
 ### Dependencies
 Phase 7
@@ -557,15 +559,15 @@ Implement the student-specific academic data layer with structured academic reco
   ```
 
 ### Acceptance Criteria
-- [x] Student academic records with structured data (not free-text)
-- [x] All academic assessment types supported (EXAM, MIDTERM, QUIZ, etc.)
-- [x] Deterministic academic calculations correct
-- [x] Growth calculated: absolute and percentage
-- [x] Trend detected: IMPROVING, STABLE, DECLINING
-- [x] Consistency calculated
-- [x] Subject-level strengths and weaknesses identified
-- [x] Calculated facts available as structured input to AI evaluation
-- [x] Full student assessment pipeline works end-to-end
+- [ ] Student academic records with structured data (not free-text)
+- [ ] All academic assessment types supported (EXAM, MIDTERM, QUIZ, etc.)
+- [ ] Deterministic academic calculations correct
+- [ ] Growth calculated: absolute and percentage
+- [ ] Trend detected: IMPROVING, STABLE, DECLINING
+- [ ] Consistency calculated
+- [ ] Subject-level strengths and weaknesses identified
+- [ ] Calculated facts available as structured input to AI evaluation
+- [ ] Full student assessment pipeline works end-to-end
 
 ### Dependencies
 Phase 8
@@ -611,12 +613,12 @@ Implement comprehensive audit logging, RBAC, and security controls.
 - Security: Unauthorized access blocked; wrong institution blocked; insufficient role blocked
 
 ### Acceptance Criteria
-- [x] Every significant action generates an audit event
-- [x] Assessment lifecycle fully auditable
-- [x] RBAC enforced on all APIs
-- [x] Institution isolation enforced (cannot access other institution's data)
-- [x] AI provider credentials secured
-- [x] Audit query API functional
+- [ ] Every significant action generates an audit event
+- [ ] Assessment lifecycle fully auditable
+- [ ] RBAC enforced on all APIs
+- [ ] Institution isolation enforced (cannot access other institution's data)
+- [ ] AI provider credentials secured
+- [ ] Audit query API functional
 
 ### Dependencies
 Phase 9
@@ -670,10 +672,10 @@ src/test/resources/benchmark/
 - Reproducibility verification
 
 ### Acceptance Criteria
-- [x] Benchmark dataset with ≥15 representative cases
-- [x] Benchmark runner executes all cases and produces metrics report
-- [x] Scoring regression tests verify deterministic reproducibility
-- [x] Baseline results recorded for future regression comparison
+- [ ] Benchmark dataset with ≥15 representative cases
+- [ ] Benchmark runner executes all cases and produces metrics report
+- [ ] Scoring regression tests verify deterministic reproducibility
+- [ ] Baseline results recorded for future regression comparison
 
 ### Dependencies
 Phase 10
@@ -755,7 +757,7 @@ Phase 12 (RAG - Future)
 
 ## Implementation Notes for Gemini
 
-1. **Read the architecture documents** (01 through 07) before starting any phase. They are the source of truth.
+1. **Read the architecture documents** (01 through 09) before starting any phase. They are the source of truth. Each document is authoritative for its concern — see `01-architecture.md` §0.1 for the concern-based authority model.
 
 2. **One phase at a time.** Complete Phase N, verify all acceptance criteria, then proceed to Phase N+1.
 
@@ -773,4 +775,4 @@ Phase 12 (RAG - Future)
 
 9. **ArchUnit tests must pass at every phase.** Run architecture tests after every module addition.
 
-10. **Refer to scoring engine document (06) for scoring policies marked `SCORING POLICY TO BE FINALIZED`.** Implement reasonable defaults with clear documentation. Do not invent arbitrary formulas.
+10. **Do NOT invent scoring formulas or institutional defaults.** Any scoring policy marked `SCORING POLICY TO BE FINALIZED` or `POLICY-GATED` in doc 06 represents a genuine institutional decision that has not been made. Implement the scoring-engine mechanism (strategy interface, aggregation, weight redistribution) to be fully functional and testable with mock/test policy values. Do NOT invent "reasonable defaults" for parameters such as confidence formula weights, evidence quality thresholds, or domain-specific aggregation rules. Use placeholder test values that are clearly documented as test-only configurations. The architecture specification will explicitly resolve policies before or during implementation when institutional approval is obtained.

@@ -1,5 +1,104 @@
 # 01 — Architecture
 
+> **Specification Version:** DRAFT — Pre-Hardening
+> **Status:** NOT FROZEN — Architecture Specification v1 pending WS-20 verification.
+
+---
+
+## 0. Specification Governance
+
+### 0.1 Document Authority by Concern
+
+Each specification document is authoritative for its designated concern. `01` is the highest-level architectural authority. For specialized concerns, the corresponding document governs. Cross-concern conflicts must be explicitly reconciled rather than resolved by document number alone.
+
+| Document | Authoritative Concern |
+|----------|-----------------------|
+| `01-architecture.md` | System architecture, module boundaries, dependency direction, cross-cutting decisions, ADRs |
+| `02-domain-model.md` | Aggregates, entities, value objects, domain invariants, lifecycle concepts |
+| `03-database-design.md` | Relational realization, constraints, indexes, persistence integrity, schema |
+| `04-api-spec.md` | Public API contracts, HTTP semantics, request/response shapes, authorization surfaces |
+| `05-ai-evaluation-design.md` | AI request/response contracts, AI interactions, validation, retry/fallback, grounding |
+| `06-scoring-engine.md` | Mathematical scoring semantics, normalization, aggregation, missing-data behavior, strategy contracts |
+| `07-testing-strategy.md` | Testing requirements, benchmark methodology, regression strategy |
+| `08-implementation-plan.md` | Implementation sequence, phase dependencies, acceptance criteria, architecture gates |
+| `09-ui-ux-design-system.md` | User experience, presentation, interaction patterns, responsive/mobile, accessibility |
+
+### 0.2 Change Control
+
+No lower-level document may silently contradict a higher-level architectural decision established in `01`. When a specialized document (e.g., `06` for scoring) establishes a contract within its domain of authority, other documents must conform to it for that concern. If a genuine conflict is discovered, it must be reconciled explicitly with a documented rationale — not resolved by ignoring one document.
+
+### 0.3 Canonical Glossary
+
+The following terms have precise meanings throughout the specification. All documents must use these definitions consistently.
+
+#### Score Concepts
+
+| Term | Definition |
+|------|-----------|
+| `normalizedScore` | Scoring-engine-produced canonical 0–100 BigDecimal score for a parameter. Output of strategy execution. |
+| `aiSuggestedScore` | AI-reported qualitative score suggestion within 0–100. Input to `QUALITATIVE_RUBRIC` and `HYBRID` scoring strategies via `QualitativeEvaluationInput`. |
+| `preReviewScore` | The parameter's `normalizedScore` at the time human review begins. Strategy-neutral — works for OBJECTIVE, QUALITATIVE, HYBRID, DERIVED, and COMPOSITE parameters. |
+| `humanApprovedScore` | The score a reviewer has approved or set. Equals `preReviewScore` if approved without change; differs if modified. |
+| `finalScore` | The effective parameter score used in overall calculation: `humanApprovedScore` if present, else `normalizedScore`. |
+| `overallScore` | Weighted sum of all active parameters' `finalScore` values. |
+| `configuredWeight` | Framework-defined parameter weight (from `ParameterWeight`). Invariant: all configured weights for active parameters sum to 1.0000. |
+| `effectiveWeight` | Actual weight used in a specific calculation after N/A parameter redistribution. Recorded in `ParameterResult` for audit. |
+
+#### Rubric and Rating Concepts
+
+| Term | Definition |
+|------|-----------|
+| `rubricLevel` | Platform-resolved ordinal level within a parameter's configured rubric. Determined from `normalizedScore` against configured rubric ranges. |
+| `aiReportedRubricLevel` | AI's suggested rubric level. Diagnostic — platform derives the authoritative `rubricLevel` from the canonical score. Discrepancies are recorded as validation warnings. |
+| `overallRatingValue` | Framework-level overall assessment rating code (e.g., "4", "A"). Derived from `overallScore` via configured `RatingScale`. |
+| `overallRatingLabel` | Human-readable label for the overall rating (e.g., "Exceeds Expectations"). |
+
+#### Confidence and Evidence Quality
+
+| Term | Definition |
+|------|-----------|
+| `aiReportedConfidence` | Model's self-reported confidence (0.0–1.0). Diagnostic metadata, NOT a calibrated probability. |
+| `evaluationConfidence` | Platform-computed composite confidence incorporating evidence quality, source diversity, and optionally dampened AI confidence. Formula is POLICY-GATED. |
+| `methodDeterminism` | Whether the scoring method is mathematically deterministic (e.g., OBJECTIVE = deterministic; QUALITATIVE = non-deterministic). Separate from `evaluationConfidence` — a deterministic method can still have low confidence if input data is incomplete or low-quality. |
+| `evidenceStrength` | Platform-determined evidence quality level (`HIGH`, `MEDIUM`, `LOW`, `INSUFFICIENT`). Determined by evidence module based on source diversity, reliability, verification, corroboration, quantity, and recency. |
+| `aiReportedEvidenceStrength` | AI's assessment of evidence quality. Diagnostic, not authoritative. |
+| `evidenceSufficiency` | Rule-based determination of whether minimum evidence requirements are met for a parameter. States: `SUFFICIENT`, `INSUFFICIENT`, `MISSING_REQUIRED`, `NOT_APPLICABLE`. Owned by the evidence module. |
+
+#### Lifecycle Concepts
+
+| Term | Definition |
+|------|-----------|
+| `assessment` | Institutional evaluation of a subject over a period using a specific framework version. |
+| `evaluation` | AI-assisted qualitative assessment of evidence against a rubric for one or more parameters. |
+| `review` | Human examination of a parameter's score. Possible actions: approve, modify (with justification), or return. |
+| `override` | Human modification of a score from its pre-review value. Always requires justification and creates audit trail. |
+| `framework` | Institutional assessment configuration container. |
+| `frameworkVersion` | Immutable snapshot of a framework's complete configuration (parameters, rubrics, weights, scoring rules, rating scale). |
+| `domainType` | Assessment domain classification: `EMPLOYEE`, `TEACHER`, `STUDENT`. |
+
+#### Entity and Data Concepts
+
+| Term | Definition |
+|------|-----------|
+| `evidenceVerificationStatus` | Authoritative verification state of an evidence item: `UNVERIFIED`, `VERIFIED`, `REJECTED`. Set by authorized verifiers, not submitters. |
+| `EvidenceSourceType` | Classification of evidence origin: `SYSTEM_GENERATED`, `OFFICIAL_RECORD`, `SUPERVISOR`, `TEACHER`, `PEER`, `SELF_REPORTED`, `EXTERNAL`, `DERIVED`. |
+| `EvidenceReliability` | Framework-configured or verifier-assigned reliability level. Self-reported evidence cannot self-assign HIGH reliability. |
+| `QualitativeEvaluationInput` | Scoring-module-owned value object containing AI evaluation results in a provider-neutral form. Mapped from `AiParameterEvaluation` by the evaluation module. Scoring never imports AI/evaluation types. |
+
+### 0.4 Entity Mutability Classification
+
+Every persistent entity in the platform falls into one of three categories:
+
+| Category | Behavior | Examples |
+|----------|----------|---------|
+| **Mutable-Draft** | Editable while in DRAFT state; frozen on activation/finalization | `FrameworkVersion` (draft), `ParameterDefinition` (draft), `Assessment` (status field) |
+| **Mutable-Workflow** | Updated during normal workflow; protected by optimistic locking (`@Version`) | `Assessment`, `ReviewSession`, `EvaluationRun` |
+| **Immutable-Historical** | Never modified after creation; append-only versioning for corrections | `AssessmentResult`, `ParameterResult`, `AiParameterEvaluation`, `EvaluationRun` (completed), `ParameterReview`, `OverallOverride`, `AuditEvent`, `AiInteraction`, `PenPicture` |
+
+> **Invariant:** No immutable-historical record may be modified. Corrections create new versioned records. The scoring engine must produce identical results given the same immutable inputs.
+
+---
+
 ## 1. Architecture Goals
 
 | # | Goal | Rationale |
@@ -132,9 +231,10 @@ The Student engine additionally activates the **Academic Module** for structured
 
 **Responsibilities:**
 - Assessment creation (linking a subject to a framework version and assessment period)
-- Assessment lifecycle/state management: `CREATED → EVIDENCE_COLLECTION → EVALUATING → EVALUATED → UNDER_REVIEW → APPROVED → FINALIZED`
+- Assessment lifecycle/state management: `CREATED → EVIDENCE_COLLECTION → EVALUATION_READY → EVALUATING → EVALUATED → UNDER_REVIEW → APPROVED → FINALIZED`
 - Assessment period management
 - Subject identity (reference to external HR/LMS subject)
+- Domain invariant: `AssessmentSubject.subjectType` must match the framework's `DomainType`
 
 **Domain Concepts:**
 - `Assessment`, `AssessmentSubject`, `AssessmentPeriod`, `AssessmentStatus`
@@ -182,9 +282,11 @@ The Student engine additionally activates the **Academic Module** for structured
 - All deterministic arithmetic
 
 **Domain Concepts:**
-- `ParameterResult`, `AssessmentResult`, `CanonicalScore`, `WeightedScore`, `ScoringStrategy` (interface), `ObjectiveScoringStrategy`, `QualitativeRubricScoringStrategy`, `HybridScoringStrategy`, `DerivedScoringStrategy`, `CompositeScoringStrategy`, `MissingDataPolicy`, `RatingConversion`, `ScoreCalculation`
+- `ParameterResult`, `AssessmentResult`, `CanonicalScore`, `WeightedScore`, `ScoringStrategy` (interface), `ObjectiveScoringStrategy`, `QualitativeRubricScoringStrategy`, `HybridScoringStrategy`, `DerivedScoringStrategy`, `CompositeScoringStrategy`, `MissingDataPolicy`, `RatingConversion`, `ScoreCalculation`, `QualitativeEvaluationInput` (VO — scoring-owned input contract for AI evaluation results), `ParameterResultStatus`, `AssessmentResultStatus`
 
 **Dependencies:** `framework`, `evidence`, `common`
+
+**Critical Boundary:** Scoring does NOT depend on `evaluation` or `ai` modules. AI evaluation results enter scoring as `QualitativeEvaluationInput`, a value object defined and owned by the scoring module. The evaluation module maps `AiParameterEvaluation` → `QualitativeEvaluationInput` before invoking scoring.
 
 **Does NOT own:** AI evaluation, evidence storage, human review decisions, pen pictures.
 
@@ -197,16 +299,19 @@ The Student engine additionally activates the **Academic Module** for structured
 - Assembling evaluation context (evidence sets, rubrics, calculated objective facts)
 - Dispatching to AI gateway
 - Receiving and validating structured AI responses
-- Storing AI evaluation results immutably
-- Recording AI model metadata per evaluation run
-- Retry/failure handling
+- Storing AI evaluation results immutably (`AiParameterEvaluation`)
+- Recording per-AI-call audit metadata (`AiInteraction`)
+- Creating `EvaluationInputSnapshot` for historical reproducibility
+- Mapping validated AI output to scoring-module input (`QualitativeEvaluationInput`)
+- Invoking the scoring engine with assembled context
+- Retry/failure handling with crash recovery for in-progress evaluations
 
 **Domain Concepts:**
-- `EvaluationRun`, `EvaluationRequest`, `EvaluationContext`, `AiParameterEvaluation`, `AiEvaluationResult`, `EvaluationStatus`, `AiModelMetadata`
+- `EvaluationRun`, `EvaluationRequest`, `EvaluationContext`, `AiParameterEvaluation`, `EvaluationStatus`, `AiInteraction`, `EvaluationInputSnapshot`
 
-**Dependencies:** `assessment`, `evidence`, `framework`, `ai` (port), `scoring` (for objective pre-calculations), `common`
+**Dependencies:** `assessment`, `evidence`, `framework`, `ai` (port), `scoring` (invokes scoring engine; maps to `QualitativeEvaluationInput`), `common`
 
-**Does NOT own:** AI provider implementation, scoring execution, human review.
+**Does NOT own:** AI provider implementation, scoring strategy logic, human review.
 
 ---
 
@@ -237,15 +342,20 @@ The Student engine additionally activates the **Academic Module** for structured
 - Human review workflow management
 - Parameter-level approve/modify/return actions
 - Override recording with mandatory justification
-- Reviewer assignment and permissions
+- Strategy-aware override permissions (OBJECTIVE parameters prefer source-data correction; QUALITATIVE allows direct modification; HYBRID distinguishes component correction; DERIVED/COMPOSITE prefer dependency correction)
 - Review history (append-only)
 - Overall-result override (exceptional, permission-controlled)
 - Triggering score recalculation after parameter-level overrides
+- Invariant: at most one IN_PROGRESS ReviewSession per assessment + result version
+
+> **Note:** Reviewer assignment is external/host-managed in v1. The review module does not own formal assignment workflows.
 
 **Domain Concepts:**
-- `ReviewSession`, `ParameterReview`, `ReviewAction` (`APPROVED`, `MODIFIED`, `RETURNED`), `OverrideRecord`, `ReviewerInfo`, `OverallOverride`
+- `ReviewSession`, `ParameterReview`, `ReviewAction` (`APPROVED`, `MODIFIED`, `RETURNED`), `OverrideRecord`, `ReviewerInfo`, `OverallOverride`, `ReviewSessionStatus`
 
-**Dependencies:** `assessment`, `evaluation`, `scoring`, `framework`, `common`
+**Dependencies:** `assessment`, `scoring`, `framework`, `common`
+
+> **Dependency note:** Review does NOT depend on `evaluation`. Review operates on `ParameterResult` (which contains the `preReviewScore`), not directly on AI evaluation data. AI justification may be surfaced via API joins, not compile-time module dependency.
 
 **Does NOT own:** AI evaluation execution, evidence management, pen-picture generation.
 
@@ -331,19 +441,22 @@ The Student engine additionally activates the **Academic Module** for structured
 
 **Responsibilities:**
 - Base entity/value object abstractions
-- Shared domain primitives (`InstitutionId`, `UserId`, `Money`, `Percentage`, etc.)
+- Shared domain primitives (`InstitutionId`, `UserId`, `Percentage`, etc.)
 - Domain event infrastructure
 - Validation utilities
 - Temporal utilities (assessment period helpers)
 - Exception hierarchy
 - Shared DTOs for cross-module communication
+- `InstitutionContext` — tenant resolution for all repository operations
 
 **Domain Concepts:**
-- `BaseEntity`, `AuditableEntity`, `DomainEvent`, `EntityId`, `VersionedEntity`
+- `BaseEntity`, `AuditableEntity`, `DomainEvent`, `EntityId`, `VersionedEntity`, `InstitutionContext`
 
 **Dependencies:** None (leaf module)
 
 **Does NOT own:** Any business logic.
+
+**Protection Rule:** `common` must not contain feature-specific code. It provides infrastructure shared across all modules. ArchUnit enforces that `common` does not import from any feature module.
 
 ---
 
@@ -631,25 +744,97 @@ com.aias/                                    (AI Assessment System)
 
 ### 10.1 Domain Events
 
-Modules communicate asynchronously through domain events published via Spring's `ApplicationEventPublisher`:
+Modules communicate through domain events published via Spring's `ApplicationEventPublisher`:
 
 - `AssessmentCreatedEvent`
 - `EvidenceSubmittedEvent`
 - `EvaluationCompletedEvent`
+- `EvaluationFailedEvent`
 - `ReviewCompletedEvent`
 - `ScoreRecalculatedEvent`
 - `PenPictureGeneratedEvent`
 - `FrameworkVersionActivatedEvent`
+- `AssessmentFinalizedEvent`
 
 The audit module subscribes to all events. Other modules subscribe selectively.
 
-### 10.2 Transaction Boundaries
+**Event delivery semantics:**
 
-Each application service method defines its own transaction boundary. Cross-module operations that must be atomic use the orchestrating application service's transaction. Events that trigger actions in other modules use eventual consistency via `@TransactionalEventListener`.
+| Listener Type | Timing | Use Case |
+|---------------|--------|----------|
+| `@TransactionalEventListener(AFTER_COMMIT)` | After the originating transaction commits | Audit recording, notification dispatch, non-critical side effects |
+| `@EventListener` (synchronous) | Within the originating transaction | Validation, cross-module state checks that must be consistent |
+
+> **Design Note:** v1 uses Spring's in-process event bus. No external message broker. Events are not guaranteed durable by default — see §10.2 for audit durability.
+
+### 10.2 Transaction Boundaries and Audit Durability
+
+Each application service method defines its own transaction boundary. Cross-module operations that must be atomic use the orchestrating application service's transaction.
+
+**AI calls occur OUTSIDE database transactions.** The evaluation orchestrator:
+1. Persists `EvaluationRun` with status `IN_PROGRESS` (committed)
+2. Executes AI calls outside any transaction
+3. Persists results in a new transaction
+4. Updates `EvaluationRun` status (committed)
+
+This prevents long-running AI calls from holding database connections/locks.
+
+**Audit durability model:**
+
+Critical audit records (score changes, overrides, lifecycle transitions, AI interactions) use a **transactional outbox** pattern:
+
+```text
+Business transaction:
+  1. Persist business state change
+  2. Persist durable audit outbox record(s)
+  3. COMMIT
+
+Local outbox processor (after commit):
+  4. Read unprocessed outbox records
+  5. Write to audit_event table
+  6. Mark outbox records as processed
+```
+
+An application crash after step 3 does NOT lose the audit record — the outbox processor picks it up on restart. No external message broker is required for v1.
 
 ### 10.3 Observability
 
+- **Phase 0:** Baseline Micrometer metrics, Spring Boot Actuator health/info/metrics endpoints.
+- **Phase 10:** OpenTelemetry tracing, security/audit observability hardening, AI call instrumentation.
 - All AI gateway calls are instrumented with Micrometer timers and counters.
-- Scoring calculations log input/output for traceability.
+- Scoring calculations log correlation IDs and durations (NOT full evidence bodies or PII).
 - Assessment state transitions emit structured log events.
 - OpenTelemetry trace context propagates through the evaluation pipeline.
+
+> **PII/logging rule:** Do not log full evidence content, raw AI prompts/responses, or subject PII at normal log levels. Use entity IDs, correlation IDs, status codes, and durations. Raw AI content is stored in `AiInteraction` records with access restrictions, not in application logs.
+
+### 10.4 Concurrency Control
+
+Mutable aggregate roots (`Assessment`, `ReviewSession`, draft `FrameworkVersion`) use JPA `@Version` for optimistic locking. Concurrent modifications produce `409 Conflict` at the API layer.
+
+Specific concurrency invariants:
+- Framework activation: at most one ACTIVE version per framework (partial unique index)
+- Evaluation trigger: duplicate/concurrent evaluation commands rejected via `EvaluationRun` status check
+- Review: at most one IN_PROGRESS `ReviewSession` per assessment + result version
+- Result recalculation: serialized via optimistic locking on `AssessmentResult`
+
+### 10.5 Domain/JPA Coupling Decision (ADR-11)
+
+**Decision:** Domain entity classes carry JPA annotations (`@Entity`, `@Id`, `@Column`, etc.) directly.
+
+**Rationale:** In a modular monolith with a single persistence technology (PostgreSQL/JPA), introducing a separate persistence mapping layer adds significant complexity (manual mappers, parallel class hierarchies) without proportional benefit. The `@Entity` annotation is the only Spring/Jakarta coupling in domain model classes — domain logic remains framework-free.
+
+**Constraint:** Domain model classes in `domain/model/` must NOT import Spring Framework annotations (e.g., `@Service`, `@Component`, `@Autowired`). JPA/Jakarta Validation annotations are permitted as a pragmatic coupling. ArchUnit enforces this boundary.
+
+**Trade-off:** If the persistence technology changes (unlikely for v1), domain entities must be modified. Acceptable for current project scale.
+
+### 10.6 Cross-Module Access Rules
+
+Modules access each other through published application-layer interfaces (services), never through direct repository imports:
+
+```text
+✓  EvaluationService → EvidenceService.getEvidenceSet(assessmentId, parameterId)
+✗  EvaluationService → EvidenceRepository.findByAssessmentId(assessmentId)
+```
+
+Repositories are package-private within their owning module. ArchUnit enforces this.

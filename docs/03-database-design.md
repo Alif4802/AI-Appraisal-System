@@ -286,7 +286,7 @@
 | `id` | `UUID` | PK | |
 | `assessment_id` | `UUID` | FK → assessment | |
 | `framework_version_id` | `UUID` | FK → framework_version | |
-| `status` | `VARCHAR(50)` | NOT NULL | |
+| `status` | `VARCHAR(50)` | NOT NULL | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `PARTIALLY_COMPLETED`, `STALE` |
 | `provider_type` | `VARCHAR(50)` | NOT NULL | AI provider |
 | `model_name` | `VARCHAR(100)` | NOT NULL | Model name |
 | `model_version` | `VARCHAR(100)` | | Model version |
@@ -294,6 +294,8 @@
 | `additional_ai_config` | `JSONB` | | Other AI config |
 | `prompt_template_id` | `UUID` | FK → prompt_template | |
 | `prompt_version` | `INTEGER` | NOT NULL | Prompt version |
+| `evaluation_input_snapshot` | `JSONB` | | Immutable snapshot of input context (evidence IDs, verification states, objective facts, locale) |
+| `requested_locale` | `VARCHAR(10)` | NOT NULL, DEFAULT 'en' | Locale for AI qualitative interpretation |
 | `requested_by` | `UUID` | NOT NULL | |
 | `started_at` | `TIMESTAMPTZ` | | |
 | `completed_at` | `TIMESTAMPTZ` | | |
@@ -316,7 +318,32 @@
 | `improvement_areas` | `JSONB` | | Array of areas |
 | `dimension_scores` | `JSONB` | | Per-dimension scores |
 | `evidence_references` | `JSONB` | | Array of evidence_item IDs |
-| `raw_ai_response` | `TEXT` | | Full raw response |
+| `raw_ai_response` | `TEXT` | | Full raw response (for debugging/audit) |
+| `status` | `VARCHAR(50)` | NOT NULL, DEFAULT 'COMPLETED' | `COMPLETED`, `FAILED`, `SKIPPED` |
+
+#### `ai_interaction`
+
+Per-AI-call operational audit record. One evaluation_run may have many ai_interactions (one per parameter, plus retries).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK | |
+| `evaluation_run_id` | `UUID` | FK → evaluation_run | |
+| `parameter_definition_id` | `UUID` | FK → parameter_definition, NULLABLE | Null for batch calls |
+| `request_timestamp` | `TIMESTAMPTZ` | NOT NULL | |
+| `response_timestamp` | `TIMESTAMPTZ` | | |
+| `duration_ms` | `BIGINT` | | |
+| `provider_type` | `VARCHAR(50)` | NOT NULL | |
+| `model_name` | `VARCHAR(100)` | NOT NULL | |
+| `prompt_version_ref` | `VARCHAR(100)` | | |
+| `input_token_count` | `INTEGER` | | |
+| `output_token_count` | `INTEGER` | | |
+| `http_status` | `INTEGER` | | |
+| `success` | `BOOLEAN` | NOT NULL | |
+| `failure_reason` | `TEXT` | | |
+| `attempt_number` | `INTEGER` | NOT NULL, DEFAULT 1 | |
+
+**Index:** `(evaluation_run_id)` — all interactions for a run
 
 ---
 
@@ -329,12 +356,15 @@
 | `id` | `UUID` | PK | |
 | `assessment_id` | `UUID` | FK → assessment | |
 | `framework_version_id` | `UUID` | FK → framework_version | |
-| `evaluation_run_id` | `UUID` | FK → evaluation_run | Source evaluation |
+| `evaluation_run_id` | `UUID` | FK → evaluation_run, NULLABLE | Source evaluation (null for pure-objective recalc) |
 | `overall_score` | `NUMERIC(7,4)` | | 0.0000–100.0000 |
-| `overall_rating` | `VARCHAR(50)` | | Display rating |
-| `result_status` | `VARCHAR(50)` | NOT NULL | `PRELIMINARY`, `REVIEWED`, `APPROVED`, `OVERRIDDEN` |
-| `version` | `INTEGER` | NOT NULL, DEFAULT 1 | Result version |
+| `overall_rating_value` | `VARCHAR(50)` | | Rating code from RatingScale |
+| `overall_rating_label` | `VARCHAR(255)` | | Human-readable rating label |
+| `completeness` | `VARCHAR(50)` | NOT NULL | `COMPLETE`, `PARTIAL`, `BLOCKED` |
+| `version` | `INTEGER` | NOT NULL, DEFAULT 1 | Immutable result version |
 | `calculated_at` | `TIMESTAMPTZ` | NOT NULL | |
+
+> **Immutability:** Rows in `assessment_result` are NEVER updated. Recalculation inserts a new row with incremented `version`.
 
 **Index:** `(assessment_id, version DESC)` — latest result
 
@@ -346,19 +376,22 @@
 | `assessment_result_id` | `UUID` | FK → assessment_result | |
 | `parameter_definition_id` | `UUID` | FK → parameter_definition | |
 | `scoring_strategy_type` | `VARCHAR(50)` | NOT NULL | Strategy used |
-| `raw_value` | `NUMERIC(12,4)` | | Raw metric |
+| `raw_value` | `NUMERIC(12,4)` | | Raw metric (OBJECTIVE params) |
 | `normalized_score` | `NUMERIC(7,4)` | | Canonical 0–100 |
-| `ai_suggested_score` | `NUMERIC(7,4)` | | AI suggestion |
-| `human_approved_score` | `NUMERIC(7,4)` | | Human decision |
-| `final_score` | `NUMERIC(7,4)` | | Effective final score |
-| `weight` | `NUMERIC(5,4)` | NOT NULL | Weight at calculation time |
-| `weighted_score` | `NUMERIC(7,4)` | | final × weight |
-| `evidence_sufficiency` | `VARCHAR(50)` | | `SUFFICIENT`, `INSUFFICIENT`, `MISSING_REQUIRED`, `NOT_APPLICABLE` |
-| `evidence_strength` | `VARCHAR(50)` | | `HIGH`, `MEDIUM`, `LOW`, `INSUFFICIENT` |
-| `evaluation_confidence` | `NUMERIC(5,4)` | | 0.0000–1.0000 |
-| `rubric_level` | `INTEGER` | | Mapped rubric level |
-| `display_rating` | `VARCHAR(50)` | | Display rating |
-| `calculation_metadata` | `JSONB` | | Audit data for calculation |
+| `ai_suggested_score` | `NUMERIC(7,4)` | | AI suggestion (null for OBJECTIVE) |
+| `pre_review_score` | `NUMERIC(7,4)` | | = normalized_score; snapshot for review |
+| `human_approved_score` | `NUMERIC(7,4)` | | Reviewer decision (null if unreviewed) |
+| `final_score` | `NUMERIC(7,4)` | | = human_approved if set, else normalized |
+| `configured_weight` | `NUMERIC(5,4)` | NOT NULL | Framework-defined weight |
+| `effective_weight` | `NUMERIC(5,4)` | NOT NULL | Actual weight after N/A redistribution |
+| `weighted_score` | `NUMERIC(7,4)` | | final_score × effective_weight |
+| `status` | `VARCHAR(50)` | NOT NULL | `SCORED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`, `EVALUATION_FAILED`, `EXCLUDED` |
+| `evidence_sufficiency` | `VARCHAR(50)` | | |
+| `evidence_strength` | `VARCHAR(50)` | | |
+| `evaluation_confidence` | `NUMERIC(5,4)` | | Platform-computed |
+| `rubric_level` | `INTEGER` | | Platform-resolved from normalized_score |
+| `display_rating` | `VARCHAR(50)` | | |
+| `calculation_metadata` | `JSONB` | | Audit data |
 | `calculated_at` | `TIMESTAMPTZ` | NOT NULL | |
 
 ---
@@ -388,9 +421,10 @@
 | `review_session_id` | `UUID` | FK → review_session | |
 | `parameter_definition_id` | `UUID` | FK → parameter_definition | |
 | `action` | `VARCHAR(50)` | NOT NULL | `APPROVED`, `MODIFIED`, `RETURNED` |
-| `original_ai_score` | `NUMERIC(7,4)` | | AI score at review time |
-| `approved_score` | `NUMERIC(7,4)` | | Approved score |
+| `pre_review_score` | `NUMERIC(7,4)` | | Strategy-neutral score before review |
+| `approved_score` | `NUMERIC(7,4)` | | Reviewer-approved score |
 | `override_reason` | `TEXT` | | Mandatory if MODIFIED |
+| `scoring_strategy_type` | `VARCHAR(50)` | | Strategy of the parameter |
 | `reviewed_at` | `TIMESTAMPTZ` | NOT NULL | |
 
 #### `overall_override`
@@ -527,6 +561,25 @@
 - `(institution_id, entity_type, entity_id)` — entity history
 - `(institution_id, event_type, occurred_at)` — type queries
 - `(occurred_at)` — time-range queries
+
+#### `audit_outbox`
+
+Durable outbox for critical audit records. Guarantees audit data is not lost on application crash. See `01-architecture.md` §10.2.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK | |
+| `event_type` | `VARCHAR(100)` | NOT NULL | |
+| `entity_type` | `VARCHAR(100)` | NOT NULL | |
+| `entity_id` | `UUID` | NOT NULL | |
+| `institution_id` | `UUID` | NOT NULL | |
+| `user_id` | `UUID` | | |
+| `payload` | `JSONB` | NOT NULL | Full event data |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL | |
+| `processed` | `BOOLEAN` | NOT NULL, DEFAULT false | |
+| `processed_at` | `TIMESTAMPTZ` | | |
+
+**Index:** `(processed, created_at)` WHERE `processed = false` — unprocessed record pickup
 
 ---
 
