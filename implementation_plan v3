@@ -1,0 +1,45 @@
+# Architecture Documentation Hardening — Execution Plan v3
+
+**Status:** EXECUTING — Approved with 14 amendments incorporated.
+
+## Amendments Incorporated
+
+1. **Corrected issue count**: 112 entries (A through DH), not 88.
+2. **Concern-based document authority** (not linear precedence).
+3. **Expanded EvaluationInputSnapshot** — full context preservation.
+4. **Method determinism ≠ evaluation confidence** — OBJECTIVE ≠ automatic 1.0.
+5. **Result-level completeness semantics** — COMPLETE / PARTIAL / BLOCKED.
+6. **Strategy-specific human override permissions** — OBJECTIVE data-correction preferred.
+7. **Single durable audit design** — transactional outbox, no broker.
+8. **Evaluation executor crash recovery** — stale detection, idempotent retry.
+9. **Platform-global administration authorization** — PLATFORM_ADMIN or deployment-managed.
+10. **Locale for qualitative AI evaluation** — not just pen pictures.
+11. **No forced strengths/development areas** — empty arrays legitimate.
+12. **Observability assigned to exact phases** — Phase 0 + Phase 10.
+13. **DOCUMENT_REFERENCE security** — no SSRF, URI validation only.
+14. **Explicit source-data correction mechanism** — superseding records + input snapshot pinning.
+
+## Execution Status
+
+| WS | Name | Status |
+|----|------|--------|
+| 01 | Specification governance | IN PROGRESS |
+| 02 | Module boundaries | PENDING |
+| 03 | Domain model | PENDING |
+| 04 | Evidence and reproducibility | PENDING |
+| 05 | Lifecycle and orchestration | PENDING |
+| 06 | Scoring architecture | PENDING |
+| 07 | AI architecture | PENDING |
+| 08 | Human review | PENDING |
+| 09 | Database/versioning | PENDING |
+| 10 | Multi-tenancy/security | PENDING |
+| 11 | API contracts | PENDING |
+| 12 | Student academic | PENDING |
+| 13 | Pen picture/finalization | PENDING |
+| 14 | Testing/benchmarking | PENDING |
+| 15 | UI/backend alignment | PENDING |
+| 16 | Frontend scope | PENDING |
+| 17 | Localization | PENDING |
+| 18 | Observability/audit | PENDING |
+| 19 | Implementation sequencing | PENDING |
+| 20 | Cross-document verification | PENDING |
